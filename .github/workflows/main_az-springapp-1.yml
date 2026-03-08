@@ -1,7 +1,3 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-
-
 name: Build and deploy JAR app to Azure Web App - az-springapp-1
 
 on:
@@ -19,35 +15,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Java version
+      - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           java-version: "21"
           distribution: "microsoft"
 
-      - name: Build with Maven (Spring Boot fat jar)
+      - name: Build (creates Spring Boot fat jar)
         run: mvn -B clean package -DskipTests
 
-      - name: Pick Spring Boot runnable jar and rename to app.jar
+      - name: Select Spring Boot fat jar (must contain BOOT-INF) and rename to app.jar
         shell: pwsh
         run: |
-          Write-Host "Listing target directory:"
-          Get-ChildItem -Path "target" -Force
+          $candidates = Get-ChildItem -Path "target" -Filter "*.jar" |
+            Where-Object { $_.Name -notmatch "original" }
 
-          # Exclude "original-*.jar" if present (Spring Boot plugin sometimes creates it)
-          $jars = Get-ChildItem -Path "target" -Filter "*.jar" | Where-Object { $_.Name -notmatch "original" }
+          if ($candidates.Count -eq 0) { throw "No jar files found in target/" }
 
-          if ($null -eq $jars -or $jars.Count -eq 0) {
-            throw "No jar found in target/. Build may have failed."
+          foreach ($j in ($candidates | Sort-Object Length -Descending)) {
+            Write-Host "Checking jar: $($j.Name) size=$([Math]::Round($j.Length/1MB,2))MB"
+            $hasBootInf = & jar tf $j.FullName | Select-String -Pattern "^BOOT-INF/" -Quiet
+            if ($hasBootInf) {
+              Write-Host "Selected Spring Boot fat jar: $($j.Name)"
+              Copy-Item $j.FullName "app.jar" -Force
+              exit 0
+            }
           }
 
-          # Pick the largest jar (usually the Spring Boot fat jar)
-          $jar = $jars | Sort-Object Length -Descending | Select-Object -First 1
-          Write-Host "Using jar: $($jar.Name) size=$([Math]::Round($jar.Length/1MB,2))MB"
+          throw "No Spring Boot fat jar found. Ensure spring-boot-maven-plugin repackage runs."
 
-          Copy-Item $jar.FullName "app.jar" -Force
-
-      - name: Upload artifact for deployment job
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: java-app
@@ -61,16 +58,17 @@ jobs:
       contents: read
 
     steps:
-      - name: Download artifact from build job
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: java-app
 
-      - name: Verify artifact exists
+      - name: Verify BOOT-INF exists in app.jar
         shell: pwsh
         run: |
-          Get-ChildItem -Force
-          if (-not (Test-Path "app.jar")) { throw "app.jar not found after download-artifact" }
+          if (-not (Test-Path "app.jar")) { throw "app.jar missing" }
+          $hasBootInf = & jar tf "app.jar" | Select-String -Pattern "^BOOT-INF/" -Quiet
+          if (-not $hasBootInf) { throw "Deployed jar is NOT a Spring Boot fat jar (BOOT-INF missing)." }
 
       - name: Login to Azure
         uses: azure/login@v2
