@@ -1,0 +1,14 @@
+<configuration>
+  <property name="PATTERN"
+            value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ} %-5level [%thread] %logger{36} traceId=%X{traceId} - %msg%n"/>
+
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>${PATTERN}</pattern>
+    </encoder>
+  </appender>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE"/>
+  </root>
+</configuration>
